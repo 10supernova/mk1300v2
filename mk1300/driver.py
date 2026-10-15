@@ -9,9 +9,12 @@ SAFETY: Command byte 85 (0x55) and factory reset sub-command [15, 255] are hard-
 Only per-key RGB and hardware-animation commands are permitted.
 """
 
+import ctypes
+import glob
 import math
+import os
 import time
-from typing import Callable, Dict, List, Optional, Tuple, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     import hid
@@ -49,6 +52,69 @@ TARGET_PID = 0xFE9C
 VENDOR_USAGE_PAGE = 0xFF00
 VENDOR_USAGE = 0x02
 
+# ── Native libhidapi-hidraw.so support via ctypes ────────────────────────────
+_hidraw_lib = None
+try:
+    for candidate in ("/usr/lib/libhidapi-hidraw.so.0", "/usr/lib/libhidapi-hidraw.so", "libhidapi-hidraw.so"):
+        try:
+            _hidraw_lib = ctypes.cdll.LoadLibrary(candidate)
+            _hidraw_lib.hid_init()
+            break
+        except Exception:
+            pass
+except Exception:
+    _hidraw_lib = None
+
+
+class _CtypesHidDeviceInfo(ctypes.Structure):
+    pass
+
+
+if _hidraw_lib:
+    _CtypesHidDeviceInfo._fields_ = [
+        ("path", ctypes.c_char_p),
+        ("vendor_id", ctypes.c_ushort),
+        ("product_id", ctypes.c_ushort),
+        ("serial_number", ctypes.c_wchar_p),
+        ("release_number", ctypes.c_ushort),
+        ("manufacturer_string", ctypes.c_wchar_p),
+        ("product_string", ctypes.c_wchar_p),
+        ("usage_page", ctypes.c_ushort),
+        ("usage", ctypes.c_ushort),
+        ("interface_number", ctypes.c_int),
+        ("next", ctypes.POINTER(_CtypesHidDeviceInfo)),
+    ]
+    _hidraw_lib.hid_enumerate.restype = ctypes.POINTER(_CtypesHidDeviceInfo)
+    _hidraw_lib.hid_open_path.restype = ctypes.c_void_p
+
+
+class HidrawNativeDevice:
+    """Device wrapper around native libhidapi-hidraw.so."""
+
+    def __init__(self, lib, handle: int, path: bytes):
+        self.lib = lib
+        self.handle = handle
+        self.path = path
+
+    def write(self, data: bytes) -> int:
+        buf = (ctypes.c_ubyte * len(data))(*data)
+        res = self.lib.hid_write(self.handle, buf, len(data))
+        if res < 0:
+            raise OSError("hid_write failed on native hidraw")
+        return res
+
+    def read(self, length: int = 64, timeout_ms: int = 1000) -> bytes:
+        buf = (ctypes.c_ubyte * length)()
+        res = self.lib.hid_read_timeout(self.handle, buf, length, timeout_ms)
+        if res < 0:
+            return b""
+        return bytes(buf[:res])
+
+    def close(self):
+        if self.handle:
+            self.lib.hid_close(self.handle)
+            self.handle = None
+
 
 class HIDDriver:
     """HID Driver for Ant Esports MK1300 V2 vendor configuration interface."""
@@ -64,13 +130,57 @@ class HIDDriver:
             self.on_log(msg)
 
     @classmethod
-    def find_device_info(cls) -> Optional[Dict[str, Any]]:
-        """Enumerate HID devices and find the vendor config interface."""
-        if hid is None:
-            raise RuntimeError("hidapi module is not available. Please install python-hidapi.")
+    def enumerate_all(cls) -> List[Dict[str, Any]]:
+        """Enumerate HID devices using native libhidapi-hidraw.so or python-hidapi."""
+        results = []
 
-        devices = hid.enumerate()
-        # Pass 1: exact match on usagePage 0xFF00 and usage 0x02
+        # Try native libhidapi-hidraw first
+        if _hidraw_lib:
+            try:
+                cur = _hidraw_lib.hid_enumerate(0, 0)
+                p = cur
+                while p:
+                    d = p.contents
+                    results.append({
+                        "path": d.path,
+                        "vendor_id": d.vendor_id,
+                        "product_id": d.product_id,
+                        "serial_number": d.serial_number or "",
+                        "release_number": d.release_number,
+                        "manufacturer_string": d.manufacturer_string or "",
+                        "product_string": d.product_string or "",
+                        "usage_page": d.usage_page,
+                        "usage": d.usage,
+                        "interface_number": d.interface_number,
+                        "backend": "hidraw",
+                    })
+                    p = d.next
+                if cur:
+                    _hidraw_lib.hid_free_enumeration(cur)
+                if results:
+                    return results
+            except Exception:
+                pass
+
+        # Fallback to python-hidapi
+        if hid is not None:
+            try:
+                for dev in hid.enumerate():
+                    d = dict(dev)
+                    d["backend"] = "python-hid"
+                    results.append(d)
+                return results
+            except Exception:
+                pass
+
+        return []
+
+    @classmethod
+    def find_device_info(cls) -> Optional[Dict[str, Any]]:
+        """Enumerate HID devices and find the vendor config interface (0xFF00/0x02)."""
+        devices = cls.enumerate_all()
+
+        # Pass 1: Exact match on usagePage 0xFF00 and usage 0x02
         for dev in devices:
             vid = dev.get("vendor_id", 0)
             up = dev.get("usage_page", 0)
@@ -78,16 +188,41 @@ class HIDDriver:
             if vid in TARGET_VIDS and up == VENDOR_USAGE_PAGE and u == VENDOR_USAGE:
                 return dev
 
-        # Pass 2: check if any device has 0xFF00 / 0x02 regardless of VID list
         for dev in devices:
             up = dev.get("usage_page", 0)
             u = dev.get("usage", 0)
             if up == VENDOR_USAGE_PAGE and u == VENDOR_USAGE:
                 return dev
 
-        # Pass 3: On Linux hidraw, if usage_page wasn't parsed (0), check vendor ID
-        # and interface_number != 0 (interface 0 is standard keyboard)
+        # Pass 2: Look at sysfs report descriptors for b'\x06\x00\xff\x09\x02'
+        vendor_hidraws = set()
+        for rdesc in glob.glob("/sys/class/hidraw/hidraw*/device/report_descriptor"):
+            try:
+                with open(rdesc, "rb") as f:
+                    data = f.read()
+                if b"\x06\x00\xff\x09\x02" in data:
+                    h_name = rdesc.split("/")[4]
+                    dev_link = os.path.realpath(os.path.join(rdesc, "../.."))
+                    if any(f"{vid:04X}".lower() in dev_link.lower() for vid in TARGET_VIDS):
+                        vendor_hidraws.add(h_name)
+            except Exception:
+                pass
+
+        if vendor_hidraws:
+            for dev in devices:
+                if dev.get("vendor_id") in TARGET_VIDS:
+                    path_str = dev.get("path", b"").decode("utf-8", errors="ignore")
+                    for h_name in vendor_hidraws:
+                        if h_name in path_str or f"/dev/{h_name}" in path_str:
+                            return dev
+
+        # Pass 3: Interface 2 is vendor config on MK1300 V2
         target_devs = [d for d in devices if d.get("vendor_id") in TARGET_VIDS]
+        for dev in target_devs:
+            if dev.get("interface_number") == 2:
+                return dev
+
+        # Pass 4: Fallback to non-keyboard interface
         for dev in target_devs:
             if dev.get("interface_number", 0) != 0:
                 return dev
@@ -96,9 +231,6 @@ class HIDDriver:
 
     def connect(self, dev_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Connect to the keyboard on the vendor config interface (0xFF00/0x02)."""
-        if hid is None:
-            raise RuntimeError("hidapi module is not available. Please install python-hidapi.")
-
         self.log("Searching for MK1300 V2 vendor config interface (0xFF00/0x02)...")
         if dev_info is None:
             dev_info = self.find_device_info()
@@ -109,13 +241,48 @@ class HIDDriver:
                 "Ensure the keyboard is plugged in and udev rules are installed."
             )
 
-        path = dev_info.get("path")
-        self.log(f"Opening device path: {path} (VID: 0x{dev_info.get('vendor_id', 0):04X}, PID: 0x{dev_info.get('product_id', 0):04X})")
+        raw_path = dev_info.get("path")
+        path = raw_path if isinstance(raw_path, bytes) else str(raw_path).encode("utf-8")
+        self.log(f"Opening device path: {path.decode('utf-8', errors='ignore')} (VID: 0x{dev_info.get('vendor_id', 0):04X}, PID: 0x{dev_info.get('product_id', 0):04X})")
 
-        device = hid.device()
-        device.open_path(path)
-        # Enable non-blocking mode or standard timeouts
-        device.set_nonblocking(False)
+        device = None
+
+        # Strategy A: Use native libhidapi-hidraw.so
+        if _hidraw_lib and dev_info.get("backend") == "hidraw":
+            handle = _hidraw_lib.hid_open_path(path)
+            if handle:
+                device = HidrawNativeDevice(_hidraw_lib, handle, path)
+            else:
+                # Check permissions of path if /dev/hidrawX
+                p_str = path.decode("utf-8", errors="ignore")
+                err_msg = (
+                    f"Permission denied opening {p_str}.\n"
+                    "Please install the udev rule to grant access without root:\n"
+                    "  sudo cp udev/99-mk1300.rules /etc/udev/rules.d/\n"
+                    "  sudo udevadm control --reload-rules && sudo udevadm trigger\n"
+                    f"Or temporarily test with: sudo chmod 666 {p_str}"
+                )
+                raise PermissionError(err_msg)
+
+        # Strategy B: Use python-hid module
+        if device is None and hid is not None:
+            try:
+                h_dev = hid.device()
+                h_dev.open_path(path)
+                h_dev.set_nonblocking(False)
+                device = h_dev
+            except Exception as e:
+                p_str = path.decode("utf-8", errors="ignore")
+                err_msg = (
+                    f"Failed to open {p_str}: {e}.\n"
+                    "Please install the udev rule to grant access without root:\n"
+                    "  sudo cp udev/99-mk1300.rules /etc/udev/rules.d/\n"
+                    "  sudo udevadm control --reload-rules && sudo udevadm trigger\n"
+                )
+                raise PermissionError(err_msg) from e
+
+        if device is None:
+            raise ConnectionError("No working HID backend could open the device.")
 
         self.device = device
         self.connected = True
@@ -124,7 +291,7 @@ class HIDDriver:
             "product_id": dev_info.get("product_id", 0),
             "product_name": dev_info.get("product_string", "MK1300 V2 Gaming Keyboard"),
             "manufacturer": dev_info.get("manufacturer_string", ""),
-            "path": path,
+            "path": path.decode("utf-8", errors="ignore"),
         }
         self.log("✓ Device opened successfully on vendor config interface!")
         return self.device_info
@@ -276,7 +443,6 @@ class HIDDriver:
         if global_resp and len(global_resp) >= 16:
             config = list(global_resp[5:16])
             config[0] = 0  # Type 0 = Global / Active
-            # config[1] keeps sub-type
             apply_color(config)
             self.log(f"Applying Global Config: {config}")
             self.send_device_data([11, len(config), 0, 0] + config)
@@ -286,7 +452,6 @@ class HIDDriver:
         if tpl_resp and len(tpl_resp) >= 16:
             tpl_config = list(tpl_resp[5:16])
             tpl_config[0] = 1  # Type 1 = Mode Template
-            # tpl_config[1] keeps sub-type
             apply_color(tpl_config)
             self.log(f"Applying Template Config: {tpl_config}")
             self.send_device_data([11, len(tpl_config), 0, 0] + tpl_config)
