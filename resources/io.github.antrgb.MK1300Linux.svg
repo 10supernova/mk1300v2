@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f2335" />
+      <stop offset="50%" stop-color="#1a1b26" />
+      <stop offset="100%" stop-color="#16161e" />
+    </linearGradient>
+
+    <!-- Plate Gradient -->
+    <linearGradient id="plateGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#24283b" />
+      <stop offset="100%" stop-color="#13141c" />
+    </linearGradient>
+
+    <!-- RGB Neon Glow Gradients -->
+    <linearGradient id="rgbGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f7768e" />
+      <stop offset="25%" stop-color="#ff9e64" />
+      <stop offset="50%" stop-color="#e0af68" />
+      <stop offset="75%" stop-color="#7dcfff" />
+      <stop offset="100%" stop-color="#bb9af7" />
+    </linearGradient>
+
+    <linearGradient id="rgbGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#bb9af7" />
+      <stop offset="35%" stop-color="#7aa2f7" />
+      <stop offset="70%" stop-color="#7dcfff" />
+      <stop offset="100%" stop-color="#9ece6a" />
+    </linearGradient>
+
+    <linearGradient id="rgbGrad3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#9ece6a" />
+      <stop offset="30%" stop-color="#73daca" />
+      <stop offset="70%" stop-color="#2ac3de" />
+      <stop offset="100%" stop-color="#7aa2f7" />
+    </linearGradient>
+
+    <linearGradient id="keyTop" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2e344e" />
+      <stop offset="100%" stop-color="#1f2335" />
+    </linearGradient>
+
+    <!-- Filter for Glow -->
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Squircle App Icon Base -->
+  <rect x="24" y="24" width="464" height="464" rx="100" fill="url(#bgGrad)" stroke="#292e42" stroke-width="6" />
+
+  <!-- Outer RGB Ambient Backglow -->
+  <rect x="52" y="112" width="408" height="288" rx="36" fill="url(#rgbGrad1)" opacity="0.3" filter="url(#softGlow)" />
+
+  <!-- Keyboard Case / Chassis -->
+  <rect x="56" y="116" width="400" height="280" rx="32" fill="url(#plateGrad)" stroke="#3b4261" stroke-width="4" />
+  <rect x="68" y="128" width="376" height="256" rx="20" fill="#0f1017" stroke="#1f2335" stroke-width="2" />
+
+  <!-- Underglow strip -->
+  <rect x="76" y="136" width="360" height="240" rx="14" fill="none" stroke="url(#rgbGrad2)" stroke-width="3" opacity="0.6" />
+
+  <!-- Row 0 (Number Row) -->
+  <g transform="translate(80, 144)">
+    <rect x="0" y="0" width="28" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="2" />
+    <rect x="36" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="1.5" />
+    <rect x="64" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="1.5" />
+    <rect x="92" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="1.5" />
+    <rect x="120" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#e0af68" stroke-width="1.5" />
+    <rect x="148" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#e0af68" stroke-width="1.5" />
+    <rect x="176" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#9ece6a" stroke-width="1.5" />
+    <rect x="204" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#9ece6a" stroke-width="1.5" />
+    <rect x="232" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#73daca" stroke-width="1.5" />
+    <rect x="260" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7dcfff" stroke-width="1.5" />
+    <rect x="288" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7aa2f7" stroke-width="1.5" />
+    <rect x="316" y="0" width="36" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="2" />
+  </g>
+
+  <!-- Row 1 (Tab & QWERTY) -->
+  <g transform="translate(80, 188)">
+    <rect x="0" y="0" width="38" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="2" />
+    <rect x="44" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="1.5" />
+    <rect x="72" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="1.5" />
+    <rect x="100" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#e0af68" stroke-width="1.5" />
+    <rect x="128" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#9ece6a" stroke-width="1.5" />
+    <rect x="156" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#73daca" stroke-width="1.5" />
+    <rect x="184" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7dcfff" stroke-width="1.5" />
+    <rect x="212" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7aa2f7" stroke-width="1.5" />
+    <rect x="240" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="1.5" />
+    <rect x="268" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="1.5" />
+    <rect x="296" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="1.5" />
+    <rect x="324" y="0" width="28" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="2" />
+  </g>
+
+  <!-- Row 2 (Home Row) -->
+  <g transform="translate(80, 232)">
+    <rect x="0" y="0" width="44" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="2" />
+    <rect x="50" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="1.5" />
+    <rect x="78" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#e0af68" stroke-width="1.5" />
+    <rect x="106" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#9ece6a" stroke-width="1.5" />
+    <rect x="134" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#73daca" stroke-width="1.5" />
+    <rect x="162" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7dcfff" stroke-width="1.5" />
+    <rect x="190" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7aa2f7" stroke-width="1.5" />
+    <rect x="218" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="1.5" />
+    <rect x="246" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="1.5" />
+    <rect x="274" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="1.5" />
+    <rect x="302" y="0" width="50" height="34" rx="6" fill="url(#keyTop)" stroke="#7dcfff" stroke-width="2" />
+  </g>
+
+  <!-- Row 3 (Shift Row) -->
+  <g transform="translate(80, 276)">
+    <rect x="0" y="0" width="56" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="2" />
+    <rect x="62" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7aa2f7" stroke-width="1.5" />
+    <rect x="90" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#7dcfff" stroke-width="1.5" />
+    <rect x="118" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#73daca" stroke-width="1.5" />
+    <rect x="146" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#9ece6a" stroke-width="1.5" />
+    <rect x="174" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#e0af68" stroke-width="1.5" />
+    <rect x="202" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="1.5" />
+    <rect x="230" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="1.5" />
+    <rect x="258" y="0" width="22" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="1.5" />
+    <rect x="286" y="0" width="66" height="34" rx="6" fill="url(#keyTop)" stroke="#bb9af7" stroke-width="2" />
+  </g>
+
+  <!-- Row 4 (Bottom Row with Spacebar) -->
+  <g transform="translate(80, 320)">
+    <rect x="0" y="0" width="30" height="34" rx="6" fill="url(#keyTop)" stroke="#7aa2f7" stroke-width="2" />
+    <rect x="36" y="0" width="30" height="34" rx="6" fill="url(#keyTop)" stroke="#7dcfff" stroke-width="2" />
+    <rect x="72" y="0" width="30" height="34" rx="6" fill="url(#keyTop)" stroke="#73daca" stroke-width="2" />
+    <!-- Spacebar with vivid neon gradient glow -->
+    <rect x="108" y="0" width="144" height="34" rx="6" fill="url(#keyTop)" stroke="url(#rgbGrad1)" stroke-width="2.5" />
+    <rect x="258" y="0" width="30" height="34" rx="6" fill="url(#keyTop)" stroke="#e0af68" stroke-width="2" />
+    <rect x="294" y="0" width="24" height="34" rx="6" fill="url(#keyTop)" stroke="#ff9e64" stroke-width="2" />
+    <rect x="324" y="0" width="28" height="34" rx="6" fill="url(#keyTop)" stroke="#f7768e" stroke-width="2" />
+  </g>
+
+  <!-- Sleek corner highlights -->
+  <circle cx="80" cy="80" r="4" fill="#7dcfff" opacity="0.6" />
+  <circle cx="432" cy="80" r="4" fill="#bb9af7" opacity="0.6" />
+</svg>

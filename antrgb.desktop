@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=AntRGB
+GenericName=RGB Keyboard Controller
+Comment=Native Linux RGB lighting controller for Ant Esports MK1300 V2
+Exec=/home/nova/mk1300-linux/mk1300-gui
+Icon=io.github.antrgb.MK1300Linux
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;Utility;
+Keywords=rgb;keyboard;lighting;mk1300;antesports;
+StartupNotify=true
+StartupWMClass=io.github.antrgb.MK1300Linux

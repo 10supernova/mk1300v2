@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore Ant Esports MK1300 V2 RGB Profile
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/nova/mk1300-linux/mk1300-cli restore-last
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
