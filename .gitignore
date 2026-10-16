@@ -5,3 +5,8 @@ __pycache__/
 *.pkg.tar.*
 src/
 pkg/
+dist/
+build/
+official_extracted/
+mk1300-official
+*.tar.gz

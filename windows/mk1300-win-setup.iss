@@ -33,7 +33,8 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\MK1300RGB
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-LicenseFile=..\..\LICENSE
+SourceDir=..
+LicenseFile=LICENSE
 OutputDir=dist
 OutputBaseFilename=mk1300-win-setup-{#MyAppVersion}
 Compression=lzma2/ultra64
@@ -53,12 +54,12 @@ Name: "addtopath"; Description: "Add mk1300-win to &PATH (recommended)"; GroupDe
 
 [Files]
 ; Main executable (built by PyInstaller)
-Source: "..\..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Documentation
-Source: "..\..\README.md";  DestDir: "{app}\docs"; Flags: ignoreversion
-Source: "..\..\LICENSE";    DestDir: "{app}\docs"; Flags: ignoreversion
-Source: "..\..\NOTICE";     DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "README.md";  DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "LICENSE";    DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "NOTICE";     DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\MK1300 RGB CLI";      Filename: "{app}\{#MyAppExeName}"
