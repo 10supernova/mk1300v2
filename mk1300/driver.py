@@ -13,6 +13,8 @@ import ctypes
 import glob
 import math
 import os
+import select
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -21,7 +23,7 @@ try:
 except ImportError:
     hid = None
 
-from .layout import KEY_COUNT
+from .layout import KEY_COUNT, KEYBOARD_LAYOUT
 
 # Safety blocks
 BLOCKED_COMMANDS = {85}  # 0x55: firmware / bootloader
@@ -84,8 +86,59 @@ if _hidraw_lib:
         ("interface_number", ctypes.c_int),
         ("next", ctypes.POINTER(_CtypesHidDeviceInfo)),
     ]
+    _hidraw_lib.hid_enumerate.argtypes = [ctypes.c_ushort, ctypes.c_ushort]
     _hidraw_lib.hid_enumerate.restype = ctypes.POINTER(_CtypesHidDeviceInfo)
+    _hidraw_lib.hid_free_enumeration.argtypes = [ctypes.POINTER(_CtypesHidDeviceInfo)]
+    _hidraw_lib.hid_free_enumeration.restype = None
+    _hidraw_lib.hid_open_path.argtypes = [ctypes.c_char_p]
     _hidraw_lib.hid_open_path.restype = ctypes.c_void_p
+    _hidraw_lib.hid_write.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t]
+    _hidraw_lib.hid_write.restype = ctypes.c_int
+    _hidraw_lib.hid_read_timeout.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int]
+    _hidraw_lib.hid_read_timeout.restype = ctypes.c_int
+    _hidraw_lib.hid_close.argtypes = [ctypes.c_void_p]
+    _hidraw_lib.hid_close.restype = None
+    _hidraw_lib.hid_error.argtypes = [ctypes.c_void_p]
+    _hidraw_lib.hid_error.restype = ctypes.c_wchar_p
+
+
+class LinuxHidrawDirectDevice:
+    """Robust native Linux /dev/hidraw character device using POSIX system calls."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.fd: Optional[int] = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+
+    def write(self, data: bytes) -> int:
+        if self.fd is None:
+            raise OSError("Device closed")
+        try:
+            return os.write(self.fd, data)
+        except (BlockingIOError, InterruptedError):
+            _, w, _ = select.select([], [self.fd], [], 1.0)
+            if w:
+                return os.write(self.fd, data)
+            raise TimeoutError("Write timeout on hidraw")
+
+    def read(self, length: int = 64, timeout_ms: int = 1000) -> bytes:
+        if self.fd is None:
+            return b""
+        timeout_sec = max(0.001, timeout_ms / 1000.0)
+        r, _, _ = select.select([self.fd], [], [], timeout_sec)
+        if r:
+            try:
+                return os.read(self.fd, length)
+            except Exception:
+                return b""
+        return b""
+
+    def close(self):
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except Exception:
+                pass
+            self.fd = None
 
 
 class HidrawNativeDevice:
@@ -100,7 +153,13 @@ class HidrawNativeDevice:
         buf = (ctypes.c_ubyte * len(data))(*data)
         res = self.lib.hid_write(self.handle, buf, len(data))
         if res < 0:
-            raise OSError("hid_write failed on native hidraw")
+            err = ""
+            if hasattr(self.lib, "hid_error"):
+                try:
+                    err = self.lib.hid_error(self.handle) or ""
+                except Exception:
+                    pass
+            raise OSError(f"hid_write failed on native hidraw ({err or 'write error'})")
         return res
 
     def read(self, length: int = 64, timeout_ms: int = 1000) -> bytes:
@@ -124,6 +183,7 @@ class HIDDriver:
         self.connected = device is not None
         self.on_log = on_log
         self.device_info: Dict[str, Any] = {}
+        self._io_lock = threading.RLock()
 
     def log(self, msg: str) -> None:
         if self.on_log:
@@ -247,22 +307,22 @@ class HIDDriver:
 
         device = None
 
-        # Strategy A: Use native libhidapi-hidraw.so
-        if _hidraw_lib and dev_info.get("backend") == "hidraw":
+        p_str = path.decode("utf-8", errors="ignore")
+
+        # Strategy 1: Direct Linux /dev/hidraw character device (fastest, most reliable)
+        if p_str.startswith("/dev/hidraw") and os.path.exists(p_str):
+            try:
+                device = LinuxHidrawDirectDevice(p_str)
+                self.log(f"Opened via Linux direct hidraw I/O: {p_str}")
+            except Exception as e:
+                self.log(f"Direct hidraw open notice: {e}")
+
+        # Strategy 2: Native libhidapi-hidraw.so
+        if device is None and _hidraw_lib and dev_info.get("backend") == "hidraw":
             handle = _hidraw_lib.hid_open_path(path)
             if handle:
                 device = HidrawNativeDevice(_hidraw_lib, handle, path)
-            else:
-                # Check permissions of path if /dev/hidrawX
-                p_str = path.decode("utf-8", errors="ignore")
-                err_msg = (
-                    f"Permission denied opening {p_str}.\n"
-                    "Please install the udev rule to grant access without root:\n"
-                    "  sudo cp udev/99-mk1300.rules /etc/udev/rules.d/\n"
-                    "  sudo udevadm control --reload-rules && sudo udevadm trigger\n"
-                    f"Or temporarily test with: sudo chmod 666 {p_str}"
-                )
-                raise PermissionError(err_msg)
+                self.log(f"Opened via libhidapi-hidraw: {p_str}")
 
         # Strategy B: Use python-hid module
         if device is None and hid is not None:
@@ -298,14 +358,15 @@ class HIDDriver:
 
     def disconnect(self) -> None:
         """Close connection to the device."""
-        if self.device:
-            try:
-                self.device.close()
-            except Exception:
-                pass
-        self.device = None
-        self.connected = False
-        self.log("Disconnected")
+        with self._io_lock:
+            if self.device:
+                try:
+                    self.device.close()
+                except Exception:
+                    pass
+            self.device = None
+            self.connected = False
+            self.log("Disconnected")
 
     def _safety_check(self, cmd_byte: int, payload: List[int]) -> None:
         """Block any dangerous or disallowed commands."""
@@ -329,35 +390,48 @@ class HIDDriver:
         """
         Send a 64-byte command report to the device.
         On Linux hidapi, prepend report-ID 0x00 (65 bytes total).
+        Thread-safe with automatic reconnect retry on broken pipes.
         """
         if payload is None:
             payload = []
 
         report = self.build_report(cmd_byte, payload)
 
-        if not self.device or not self.connected:
-            raise ConnectionError("Device not connected")
+        with self._io_lock:
+            if not self.device or not self.connected:
+                raise ConnectionError("Device not connected")
 
-        # Linux hidapi needs report-ID 0x00 preceding the 64-byte report
-        data_to_send = b"\x00" + bytes(report)
+            data_to_send = b"\x00" + bytes(report)
 
-        if hasattr(self.device, "send_report"):
-            # Mock or WebHID-like wrapper
-            self.device.send_report(0, report)
-        elif hasattr(self.device, "write"):
-            self.device.write(data_to_send)
-        else:
-            raise TypeError("Unsupported device interface")
+            try:
+                if hasattr(self.device, "send_report"):
+                    self.device.send_report(0, report)
+                elif hasattr(self.device, "write"):
+                    self.device.write(data_to_send)
+                else:
+                    raise TypeError("Unsupported device interface")
 
-        if read_response:
-            if hasattr(self.device, "read"):
-                resp = self.device.read(64, timeout_ms=1000)
-                return list(resp) if resp else []
-            return []
+                if read_response:
+                    if hasattr(self.device, "read"):
+                        resp = self.device.read(64, timeout_ms=1000)
+                        return list(resp) if resp else []
+                    return []
 
-        # Fire-and-forget small delay to avoid overwhelming MCU
-        time.sleep(0.002)
-        return []
+                time.sleep(0.002)
+                return []
+            except (OSError, ConnectionError) as ex:
+                self.log(f"HID write/read notice: {ex}. Attempting auto-reconnect...")
+                try:
+                    self.connect()
+                    if hasattr(self.device, "write"):
+                        self.device.write(data_to_send)
+                    if read_response and hasattr(self.device, "read"):
+                        resp = self.device.read(64, timeout_ms=1000)
+                        return list(resp) if resp else []
+                    time.sleep(0.002)
+                    return []
+                except Exception:
+                    raise ex
 
     def send_device_data(self, payload: Optional[List[int]] = None) -> List[int]:
         """Send command 6 device data with response."""
@@ -400,6 +474,160 @@ class HIDDriver:
             "color": d[6],
         }
 
+    def get_key_mappings(self, layer: int = 0, count: int = 126) -> List[Tuple[int, int, int, int]]:
+        """
+        Read key function mappings for all keys on the specified layer (0=Base, 1=Fn).
+        Replicates official app getKeyInfos protocol byte-for-byte.
+        Reads all 126 matrix slots from hardware table by default.
+        """
+        keys: List[Tuple[int, int, int, int]] = []
+        total_bytes = count * 4
+        chunk_size = 56
+        chunks = math.ceil(total_bytes / chunk_size)
+
+        for c in range(chunks):
+            offset = c * chunk_size
+            payload = [0] * 63
+            payload[0] = 8
+            payload[1] = 58
+            payload[2] = offset & 0xFF
+            payload[3] = (offset >> 8) & 0xFF
+            payload[5] = layer & 0xFF
+            resp = self.send_command(6, payload, read_response=True)
+            chunk_data = resp[8:8 + chunk_size]
+            for i in range(0, len(chunk_data), 4):
+                if len(keys) < count:
+                    t = tuple(chunk_data[i:i + 4])
+                    keys.append((t[0], t[1], t[2], t[3]))
+
+        return keys
+
+    def get_layout_key_mappings(self, layer: int = 0) -> List[Tuple[int, int, int, int]]:
+        """
+        Read the live mappings for all 61 physical keys defined in KEYBOARD_LAYOUT,
+        indexed by each key's hardware matrix slot (k.index).
+        """
+        table = self.get_key_mappings(layer=layer, count=126)
+        result: List[Tuple[int, int, int, int]] = []
+        for k in KEYBOARD_LAYOUT:
+            if k.index < len(table):
+                result.append(table[k.index])
+            else:
+                result.append((0, 0, 0, 0))
+        return result
+
+    def set_key_mapping(
+        self,
+        matrix_index: int,
+        key_type: int,
+        code1: int,
+        code2: int = 0,
+        code3: int = 0,
+        layer: int = 0,
+    ) -> None:
+        """
+        Set mapping for a single key matrix slot on specified layer.
+        Replicates official app setKeyInfo protocol with synchronous response reading.
+        """
+        payload = [0] * 63
+        byte_offset = matrix_index * 4
+        payload[0] = 16
+        payload[1] = 7
+        payload[2] = byte_offset & 0xFF
+        payload[3] = (byte_offset >> 8) & 0xFF
+        payload[5] = layer & 0xFF
+        payload[7] = key_type & 0xFF
+        payload[8] = code1 & 0xFF
+        payload[9] = code2 & 0xFF
+        payload[10] = code3 & 0xFF
+        self.send_command(6, payload, read_response=True)
+        self.log(f"Remapped hardware slot {matrix_index} on layer {layer}: type={key_type}, c1={code1}, c2={code2}")
+
+    def set_all_key_mappings(
+        self,
+        mappings: List[Tuple[int, int, int, int]],
+        layer: int = 0,
+    ) -> None:
+        """
+        Set mappings for all keys in bulk on specified layer using 56-byte chunked writes.
+        If mappings is length 61 (KEYBOARD_LAYOUT size), it merges them into the 126-entry
+        matrix table at each key's k.index, then writes the full table to hardware.
+        """
+        if len(mappings) == len(KEYBOARD_LAYOUT):
+            full_table = self.get_key_mappings(layer=layer, count=126)
+            if len(full_table) < 126:
+                full_table.extend([(0, 0, 0, 0)] * (126 - len(full_table)))
+            for i, k in enumerate(KEYBOARD_LAYOUT):
+                if k.index < len(full_table):
+                    full_table[k.index] = mappings[i]
+            target_mappings = full_table
+        else:
+            target_mappings = mappings
+
+        total_keys = len(target_mappings)
+        total_bytes = total_keys * 4
+        raw = [0] * (total_bytes + 64)
+        for i, (kt, c1, c2, c3) in enumerate(target_mappings):
+            raw[4 * i + 0] = kt & 0xFF
+            raw[4 * i + 1] = c1 & 0xFF
+            raw[4 * i + 2] = c2 & 0xFF
+            raw[4 * i + 3] = c3 & 0xFF
+
+        chunk_size = 56
+        chunks = math.ceil(total_bytes / chunk_size)
+        sent = 0
+
+        for c in range(chunks):
+            offset = c * chunk_size
+            remaining = total_bytes - sent
+            this_chunk = min(chunk_size, remaining)
+            is_last = (c == chunks - 1)
+
+            payload = [0] * 63
+            payload[0] = 9
+            payload[1] = (remaining % chunk_size + 3) if (is_last and remaining % chunk_size > 0) else (chunk_size + 3)
+            payload[2] = offset & 0xFF
+            payload[3] = (offset >> 8) & 0xFF
+            payload[5] = layer & 0xFF
+
+            for j in range(this_chunk):
+                payload[7 + j] = raw[sent + j]
+
+            self.send_command(6, payload, read_response=True)
+            sent += this_chunk
+            time.sleep(0.010)
+
+        self.log(f"Applied {total_keys} key mappings in bulk to layer {layer}")
+
+    def switch_num_to_fn_layer(self, layer: int = 0, enable_f_keys: bool = True) -> None:
+        """
+        Switch the number row keys (1..=, HW 22..33) to F1..F12 (or back to numbers 1..=).
+        Useful for instant testing of key remapping behavior.
+        """
+        # HW 22..33 correspond to keys 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, -, =
+        if enable_f_keys:
+            # F1..F12 keycodes: 58..69
+            f_codes = [58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69]
+            for i, fcode in enumerate(f_codes):
+                self.set_key_mapping(matrix_index=22 + i, key_type=32, code1=0, code2=fcode, code3=0, layer=layer)
+            self.log(f"Switched Layer {layer} number row (HW 22-33) to Function Keys F1-F12")
+        else:
+            # Standard numbers 1..0, -, =: 30..39, 45, 46
+            num_codes = [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 45, 46]
+            for i, ncode in enumerate(num_codes):
+                self.set_key_mapping(matrix_index=22 + i, key_type=32, code1=0, code2=ncode, code3=0, layer=layer)
+            self.log(f"Restored Layer {layer} number row (HW 22-33) to standard numbers (1-0, -, =)")
+
+    def set_current_profile(self, profile: int) -> None:
+        """Switch hardware active profile (0-2)."""
+        self.send_command(6, [251, profile & 0xFF], read_response=True)
+        self.log(f"Switched profile to {profile}")
+
+    def set_auto_sleep_time(self, seconds: int) -> None:
+        """Set keyboard sleep timeout in seconds."""
+        payload = [252, 2, 0, 0, seconds & 0xFF, (seconds >> 8) & 0xFF]
+        self.send_command(6, payload, read_response=True)
+        self.log(f"Set auto sleep time to {seconds}s")
     def set_hardware_animation(
         self,
         mode: int,

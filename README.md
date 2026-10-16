@@ -108,10 +108,24 @@ makepkg -si
 | `list-patterns` | `[--category <cat>] [--search <str>]` | List all 90+ static patterns with icons |
 | `apply-pattern` | `<id> [--brightness 10-100] [--mode 16\|20]` | Apply static pattern to keyboard |
 | `set-key` | `<key_name\|index> <#hex>` | Set individual key RGB color |
+| `set-all` | `<#hex> [--brightness 10-100]` | Set solid RGB color across all 61 keys |
 | `hw-animation` | `--mode <0-16/20> [--brightness 0-4] [--speed 0-4] [--color multi\|#hex]` | Configure hardware lighting animation |
+| `get-keymap` | `[--layer 0\|1]` | Read and display live key mappings from keyboard |
+| `remap-key` | `<key> <action> [--layer 0\|1]` | Remap a key function on the keyboard |
+| `switch-num-layer`| `[--layer 0\|1] [--revert]` | Toggle number row (1..=) between numbers and F1..F12 |
 | `info` | none | Query connected keyboard PID, firmware, profile, light config |
 | `restore-last` | none | Re-apply last saved pattern and brightness |
 | `smoke-test` | none | Run hardware verification test (Esc red, Q green, W blue) |
+
+---
+
+## Official Software on Linux (Companion)
+
+The official Windows software (`MK1300-V21-0-0.exe`) has also been extracted, patched for Linux Electron, and fixed (MK1300 VID/PID enabled, lighting protocols connected):
+```bash
+# Launch patched official Electron software
+./mk1300-official
+```
 
 ---
 

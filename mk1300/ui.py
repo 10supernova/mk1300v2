@@ -23,6 +23,23 @@ from .driver import HIDDriver
 from .effects import PATTERNS, PATTERNS_BY_ID, RGBColor
 from .layout import KB_HEIGHT, KB_WIDTH, KEY_COUNT, KEYBOARD_LAYOUT, Key
 from .theme import generate_gtk_css, load_theme
+from .keycodes import (
+    ALL_ACTIONS,
+    CAT_STANDARD,
+    CAT_MEDIA,
+    CAT_MOUSE,
+    CAT_LAYER,
+    CAT_SYSTEM,
+    STANDARD_ACTIONS,
+    MEDIA_ACTIONS,
+    MOUSE_ACTIONS,
+    LAYER_ACTIONS,
+    SYSTEM_ACTIONS,
+    ACTION_BY_TUPLE,
+    describe_key_tuple,
+    get_default_mappings,
+    KeyAction,
+)
 
 
 def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
@@ -67,14 +84,20 @@ def hex_to_hsv(hex_str: str) -> dict:
 class KeyboardWidget(Gtk.DrawingArea):
     """Visualizer and interactive painter for the 61-key keyboard layout."""
 
-    def __init__(self, interactive: bool = False):
+    def __init__(self, interactive: bool = False, mode: str = "paint"):
         super().__init__()
         self.interactive = interactive
+        self.mode = mode  # "paint" or "select"
         self.colors: List[Tuple[int, int, int]] = [(0, 0, 0)] * len(KEYBOARD_LAYOUT)
         self.paint_color: Tuple[int, int, int] = (255, 45, 120)  # Default neon pink
         self.selected_indices: set = set()
+        self.selected_key_idx: Optional[int] = None
+        self.key_sublabels: Optional[List[str]] = None
+        self.is_modified: Optional[List[bool]] = None
+        self.zoom: float = 1.0
         self.on_color_changed = None  # callback(key_idx, rgb)
         self.on_color_picked = None   # callback(rgb_hex)
+        self.on_key_clicked = None    # callback(key_idx)
 
         self.set_draw_func(self._draw)
         self.set_hexpand(True)
@@ -83,18 +106,41 @@ class KeyboardWidget(Gtk.DrawingArea):
         self.set_content_width(460)
 
         if self.interactive:
-            # Click and drag controller
-            drag = Gtk.GestureDrag()
-            drag.connect("drag-begin", self._on_drag_begin)
-            drag.connect("drag-update", self._on_drag_update)
-            drag.connect("drag-end", self._on_drag_end)
-            self.add_controller(drag)
+            if self.mode == "select":
+                select_click = Gtk.GestureClick()
+                select_click.set_button(1)
+                select_click.connect("pressed", self._on_select_click)
+                self.add_controller(select_click)
+            else:
+                # Click and drag controller for painting
+                drag = Gtk.GestureDrag()
+                drag.connect("drag-begin", self._on_drag_begin)
+                drag.connect("drag-update", self._on_drag_update)
+                drag.connect("drag-end", self._on_drag_end)
+                self.add_controller(drag)
 
-            # Secondary click (context menu / eyedropper)
-            click = Gtk.GestureClick()
-            click.set_button(3)  # right-click
-            click.connect("pressed", self._on_right_click)
-            self.add_controller(click)
+                # Secondary click (eyedropper)
+                click = Gtk.GestureClick()
+                click.set_button(3)  # right-click
+                click.connect("pressed", self._on_right_click)
+                self.add_controller(click)
+
+    def set_zoom(self, zoom: float):
+        """Set zoom scale (0.8x to 2.5x) and adjust layout."""
+        self.zoom = max(0.8, min(2.5, zoom))
+        self.set_content_width(int(580 * self.zoom))
+        self.set_content_height(int(190 * self.zoom))
+        self.queue_draw()
+
+    def _on_select_click(self, gesture, n_press, x, y):
+        w = self.get_width()
+        h = self.get_height()
+        idx = self._get_key_at(x, y, w, h)
+        if idx is not None:
+            self.selected_key_idx = idx
+            self.queue_draw()
+            if self.on_key_clicked:
+                self.on_key_clicked(idx)
 
     def set_colors(self, colors: List[Tuple[int, int, int]]):
         self.colors = colors
@@ -104,7 +150,8 @@ class KeyboardWidget(Gtk.DrawingArea):
         self.paint_color = (r, g, b)
 
     def _get_key_at(self, px: float, py: float, w: float, h: float) -> Optional[int]:
-        scale = min(w / KB_WIDTH, h / KB_HEIGHT) * 0.95
+        base_scale = min(w / KB_WIDTH, h / KB_HEIGHT) * 0.95
+        scale = base_scale * self.zoom
         ox = (w - (KB_WIDTH * scale)) / 2.0
         oy = (h - (KB_HEIGHT * scale)) / 2.0
 
@@ -160,8 +207,9 @@ class KeyboardWidget(Gtk.DrawingArea):
         cr.close_path()
 
     def _draw(self, area, cr: cairo.Context, width: int, height: int):
-        # Calculate fit
-        scale = min(width / KB_WIDTH, height / KB_HEIGHT) * 0.95
+        # Calculate fit with zoom multiplier
+        base_scale = min(width / KB_WIDTH, height / KB_HEIGHT) * 0.95
+        scale = base_scale * self.zoom
         ox = (width - (KB_WIDTH * scale)) / 2.0
         oy = (height - (KB_HEIGHT * scale)) / 2.0
         margin = max(1.5, scale * 0.04)
@@ -189,45 +237,107 @@ class KeyboardWidget(Gtk.DrawingArea):
             kw = key.w * scale - margin * 2
             kh = key.h * scale - margin * 2
 
+            is_selected = (self.selected_key_idx == i)
+            sublabel = self.key_sublabels[i] if (self.key_sublabels and i < len(self.key_sublabels)) else None
+            modified = self.is_modified[i] if (self.is_modified and i < len(self.is_modified)) else False
+
+            # Selection / Modified outer glow
+            if is_selected:
+                cr.set_source_rgba(0.73, 0.60, 0.97, 0.45) # Tokyo Night purple selection
+                self._draw_rounded_rect(cr, kx - 3.0, ky - 3.0, kw + 6.0, kh + 6.0, corner_r + 3.0)
+                cr.fill()
+            elif modified:
+                cr.set_source_rgba(0.49, 0.81, 1.0, 0.35) # Tokyo Night cyan glow for modified keys
+                self._draw_rounded_rect(cr, kx - 2.5, ky - 2.5, kw + 5.0, kh + 5.0, corner_r + 2.5)
+                cr.fill()
+
             r, g, b = self.colors[i] if i < len(self.colors) else (0, 0, 0)
             rf, gf, bf = r / 255.0, g / 255.0, b / 255.0
             brightness = max(r, g, b)
 
             # Draw outer glow if key is illuminated
-            if brightness > 30:
+            if brightness > 30 and not is_selected and not modified:
                 glow_r = corner_r + 2.0
                 cr.set_source_rgba(rf, gf, bf, 0.25)
                 self._draw_rounded_rect(cr, kx - 1.5, ky - 1.5, kw + 3.0, kh + 3.0, glow_r)
                 cr.fill()
 
             # Keycap background
-            # Blend RGB with keycap dark base
-            cr.set_source_rgba(rf * 0.85 + 0.08, gf * 0.85 + 0.08, bf * 0.85 + 0.12, 0.95)
+            if is_selected:
+                cr.set_source_rgba(0.20, 0.23, 0.38, 0.98)
+            elif modified:
+                cr.set_source_rgba(0.12, 0.22, 0.36, 0.98)
+            else:
+                cr.set_source_rgba(rf * 0.85 + 0.08, gf * 0.85 + 0.08, bf * 0.85 + 0.12, 0.95)
             self._draw_rounded_rect(cr, kx, ky, kw, kh, corner_r)
             cr.fill()
 
             # Keycap border
-            if brightness > 40:
+            if is_selected:
+                cr.set_source_rgba(0.73, 0.60, 0.97, 1.0)
+                cr.set_line_width(2.0)
+                self._draw_rounded_rect(cr, kx, ky, kw, kh, corner_r)
+                cr.stroke()
+            elif modified:
+                cr.set_source_rgba(0.49, 0.81, 1.0, 0.95)
+                cr.set_line_width(1.8)
+                self._draw_rounded_rect(cr, kx, ky, kw, kh, corner_r)
+                cr.stroke()
+            elif brightness > 40:
                 cr.set_source_rgba(rf, gf, bf, 0.7)
+                cr.set_line_width(1.0)
+                self._draw_rounded_rect(cr, kx, ky, kw, kh, corner_r)
+                cr.stroke()
             else:
                 cr.set_source_rgba(0.25, 0.28, 0.38, 0.5)
-            cr.set_line_width(1.0)
-            self._draw_rounded_rect(cr, kx, ky, kw, kh, corner_r)
-            cr.stroke()
+                cr.set_line_width(1.0)
+                self._draw_rounded_rect(cr, kx, ky, kw, kh, corner_r)
+                cr.stroke()
 
             # Key label text
-            # Determine contrasting font color
-            text_brightness = (rf * 0.299 + gf * 0.587 + bf * 0.114)
-            if text_brightness > 0.65:
-                cr.set_source_rgba(0.05, 0.05, 0.08, 0.95)
-            else:
-                cr.set_source_rgba(0.95, 0.95, 1.0, 0.95)
+            if modified and sublabel:
+                # Active function name displayed prominently in cyan
+                cr.set_source_rgba(0.49, 0.81, 1.0, 1.0)
+                cr.set_font_size(font_size * 0.82)
+                disp = sublabel if len(sublabel) <= 6 else sublabel[:5] + "…"
+                ext = cr.text_extents(disp)
+                cr.move_to(kx + (kw - ext.width) / 2.0 - ext.x_bearing, ky + kh * 0.44)
+                cr.show_text(disp)
 
-            extents = cr.text_extents(key.name)
-            tx = kx + (kw - extents.width) / 2.0 - extents.x_bearing
-            ty = ky + (kh - extents.height) / 2.0 - extents.y_bearing
-            cr.move_to(tx, ty)
-            cr.show_text(key.name)
+                # Default physical legend as subscript below
+                cr.set_source_rgba(0.65, 0.70, 0.85, 0.65)
+                cr.set_font_size(max(5.5, font_size * 0.56))
+                sub_disp = f"[{key.name}]"
+                ext_sub = cr.text_extents(sub_disp)
+                cr.move_to(kx + (kw - ext_sub.width) / 2.0 - ext_sub.x_bearing, ky + kh * 0.82)
+                cr.show_text(sub_disp)
+                cr.set_font_size(font_size)
+            elif sublabel and sublabel != key.name:
+                # Key name top
+                cr.set_source_rgba(0.95, 0.95, 1.0, 0.95)
+                cr.set_font_size(font_size * 0.78)
+                ext1 = cr.text_extents(key.name)
+                cr.move_to(kx + (kw - ext1.width) / 2.0 - ext1.x_bearing, ky + kh * 0.40)
+                cr.show_text(key.name)
+                # Sublabel bottom
+                cr.set_source_rgba(0.48, 0.64, 0.97, 0.95)
+                cr.set_font_size(max(5.5, font_size * 0.60))
+                disp = sublabel if len(sublabel) <= 7 else sublabel[:6] + "…"
+                ext2 = cr.text_extents(disp)
+                cr.move_to(kx + (kw - ext2.width) / 2.0 - ext2.x_bearing, ky + kh * 0.80)
+                cr.show_text(disp)
+                cr.set_font_size(font_size)
+            else:
+                text_brightness = (rf * 0.299 + gf * 0.587 + bf * 0.114)
+                if text_brightness > 0.65:
+                    cr.set_source_rgba(0.05, 0.05, 0.08, 0.95)
+                else:
+                    cr.set_source_rgba(0.95, 0.95, 1.0, 0.95)
+                extents = cr.text_extents(key.name)
+                tx = kx + (kw - extents.width) / 2.0 - extents.x_bearing
+                ty = ky + (kh - extents.height) / 2.0 - extents.y_bearing
+                cr.move_to(tx, ty)
+                cr.show_text(key.name)
 
 
 class AntRGBApp(Adw.Application):
@@ -257,6 +367,17 @@ class AntRGBApp(Adw.Application):
         if len(self.custom_colors) < len(KEYBOARD_LAYOUT):
             self.custom_colors.extend([(0, 0, 0)] * (len(KEYBOARD_LAYOUT) - len(self.custom_colors)))
         self.custom_undo_stack: List[List[Tuple[int, int, int]]] = []
+
+        # Key mapping & function behavior state
+        self.current_layer = 0
+        self.current_profile = 0
+        self.layer_mappings: Dict[int, List[Tuple[int, int, int, int]]] = {
+            0: get_default_mappings(0),
+            1: get_default_mappings(1),
+        }
+        self.selected_key_idx = 0
+        self.action_categories = [CAT_STANDARD, CAT_MEDIA, CAT_MOUSE, CAT_LAYER, CAT_SYSTEM]
+        self.current_cat_actions: List[KeyAction] = STANDARD_ACTIONS
 
     def do_activate(self):
         if not self.window:
@@ -320,10 +441,6 @@ class AntRGBApp(Adw.Application):
         self.connect_btn.connect("clicked", self._on_connect_clicked)
         status_box.append(self.connect_btn)
 
-        about_btn = Gtk.Button(icon_name="help-about-symbolic")
-        about_btn.set_tooltip_text("About AntRGB")
-        about_btn.connect("clicked", self._on_about_clicked)
-        status_box.append(about_btn)
 
         header.pack_end(status_box)
 
@@ -405,7 +522,11 @@ class AntRGBApp(Adw.Application):
         custom_tab = self._build_custom_tab()
         self.stack.add_titled(custom_tab, "custom", "Custom Painter")
 
-        # Tab 4: Diagnostics Log
+        # Tab 4: Key Remapping & Function Behavior
+        keymap_tab = self._build_keymap_tab()
+        self.stack.add_titled(keymap_tab, "keymap", "Keys & Functions")
+
+        # Tab 5: Diagnostics Log
         log_tab = self._build_log_tab()
         self.stack.add_titled(log_tab, "log", "HID Activity Log")
 
@@ -701,6 +822,381 @@ class AntRGBApp(Adw.Application):
         box.append(card)
         return box
 
+    def _build_keymap_tab(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_vexpand(True)
+
+        # Toolbar
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        toolbar.add_css_class("card-panel")
+
+        # Layer selector
+        l_lbl = Gtk.Label(label="Layer:")
+        l_lbl.add_css_class("subtitle-label")
+        toolbar.append(l_lbl)
+
+        layer_model = Gtk.StringList.new(["Layer 0: Base / Standard", "Layer 1: Fn Function Layer"])
+        self.layer_dropdown = Gtk.DropDown.new(layer_model, None)
+        self.layer_dropdown.set_selected(self.current_layer)
+        self.layer_dropdown.connect("notify::selected", self._on_layer_selected)
+        toolbar.append(self.layer_dropdown)
+
+        # Profile selector
+        p_lbl = Gtk.Label(label="Profile:")
+        p_lbl.add_css_class("subtitle-label")
+        toolbar.append(p_lbl)
+
+        profile_model = Gtk.StringList.new(["Profile 1", "Profile 2", "Profile 3"])
+        self.profile_dropdown = Gtk.DropDown.new(profile_model, None)
+        self.profile_dropdown.set_selected(self.current_profile)
+        self.profile_dropdown.connect("notify::selected", self._on_profile_selected)
+        toolbar.append(self.profile_dropdown)
+
+        # Auto sleep
+        s_lbl = Gtk.Label(label="Sleep:")
+        s_lbl.add_css_class("subtitle-label")
+        toolbar.append(s_lbl)
+
+        sleep_model = Gtk.StringList.new(["Never", "2 min", "5 min", "10 min", "30 min"])
+        self.sleep_dropdown = Gtk.DropDown.new(sleep_model, None)
+        self.sleep_dropdown.set_selected(2)
+        self.sleep_dropdown.connect("notify::selected", self._on_sleep_selected)
+        toolbar.append(self.sleep_dropdown)
+
+        # Zoom Controls
+        zoom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        z_lbl = Gtk.Label(label="Zoom:")
+        z_lbl.add_css_class("subtitle-label")
+        zoom_box.append(z_lbl)
+
+        z_out = Gtk.Button(label="🔍 −")
+        z_out.set_tooltip_text("Zoom out keyboard preview")
+        z_out.connect("clicked", self._on_zoom_out)
+        zoom_box.append(z_out)
+
+        self.zoom_lbl = Gtk.Label(label="135%")
+        self.zoom_lbl.add_css_class("monospace-font")
+        zoom_box.append(self.zoom_lbl)
+
+        z_in = Gtk.Button(label="🔍 +")
+        z_in.set_tooltip_text("Zoom in keyboard preview")
+        z_in.connect("clicked", self._on_zoom_in)
+        zoom_box.append(z_in)
+        toolbar.append(zoom_box)
+
+        toolbar.append(Gtk.Box(hexpand=True))
+
+        # Test helper: Switch number row to Fn layer
+        swap_btn = Gtk.Button(label="⚡ Switch Num Row ↔ F1-F12 (Test)")
+        swap_btn.set_tooltip_text("Toggle number row between numbers 1..= and F1..F12 on hardware for testing")
+        swap_btn.connect("clicked", self._on_swap_num_fn_clicked)
+        toolbar.append(swap_btn)
+
+        # Actions
+        read_btn = Gtk.Button(label="Read from Keyboard")
+        read_btn.set_tooltip_text("Fetch current key mappings directly from keyboard hardware")
+        read_btn.connect("clicked", self._on_read_keymap_clicked)
+        toolbar.append(read_btn)
+
+        reset_btn = Gtk.Button(label="Reset Defaults")
+        reset_btn.set_tooltip_text("Reset current layer to factory default mappings")
+        reset_btn.connect("clicked", self._on_reset_keymap_clicked)
+        toolbar.append(reset_btn)
+
+        apply_btn = Gtk.Button(label="Apply to Keyboard")
+        apply_btn.add_css_class("primary-action")
+        apply_btn.set_tooltip_text("Write all 61 key mappings for this layer to keyboard firmware")
+        apply_btn.connect("clicked", self._on_apply_keymap_clicked)
+        toolbar.append(apply_btn)
+
+        box.append(toolbar)
+
+        # Interactive Canvas Card (Zoomed in & larger)
+        kb_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        kb_card.add_css_class("card-panel")
+        kb_card.set_vexpand(True)
+
+        kb_hint = Gtk.Label(label="Click any key below to select it and customize its function behavior (modified keys glow in cyan):")
+        kb_hint.add_css_class("subtitle-label")
+        kb_card.append(kb_hint)
+
+        scroll_kb = Gtk.ScrolledWindow()
+        scroll_kb.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll_kb.set_vexpand(True)
+        scroll_kb.set_min_content_height(280)
+
+        self.keymap_kb = KeyboardWidget(interactive=True, mode="select")
+        self.keymap_kb.selected_key_idx = 0
+        self.keymap_kb.zoom = 1.35
+        self.keymap_kb.set_content_height(280)
+        self.keymap_kb.set_content_width(820)
+        self.keymap_kb.set_vexpand(True)
+        self.keymap_kb.set_hexpand(True)
+        self.keymap_kb.on_key_clicked = self._on_keymap_key_clicked
+        self._update_keymap_kb_labels()
+
+        scroll_kb.set_child(self.keymap_kb)
+        kb_card.append(scroll_kb)
+        box.append(kb_card)
+
+        # Key Inspector & Remap Editor Card
+        editor_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        editor_card.add_css_class("card-panel")
+
+        ed_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.selected_key_title = Gtk.Label(label="SELECTED KEY: Esc (#0)")
+        self.selected_key_title.add_css_class("accent-text")
+        ed_header.append(self.selected_key_title)
+
+        self.selected_key_badge = Gtk.Label(label="Current: Standard Keys: Esc")
+        self.selected_key_badge.add_css_class("subtitle-label")
+        ed_header.append(self.selected_key_badge)
+
+        editor_card.append(ed_header)
+
+        # Controls row
+        ed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+
+        cat_lbl = Gtk.Label(label="Category:")
+        cat_lbl.add_css_class("subtitle-label")
+        ed_row.append(cat_lbl)
+
+        cat_model = Gtk.StringList.new(self.action_categories)
+        self.cat_dropdown = Gtk.DropDown.new(cat_model, None)
+        self.cat_dropdown.set_selected(0)
+        self.cat_dropdown.connect("notify::selected", self._on_action_cat_changed)
+        ed_row.append(self.cat_dropdown)
+
+        act_lbl = Gtk.Label(label="Function:")
+        act_lbl.add_css_class("subtitle-label")
+        ed_row.append(act_lbl)
+
+        self.current_cat_actions = STANDARD_ACTIONS
+        self.action_model = Gtk.StringList.new([a.name for a in self.current_cat_actions])
+        self.action_dropdown = Gtk.DropDown.new(self.action_model, None)
+        self.action_dropdown.set_selected(0)
+        ed_row.append(self.action_dropdown)
+
+        assign_btn = Gtk.Button(label="Assign to Key")
+        assign_btn.add_css_class("primary-action")
+        assign_btn.connect("clicked", self._on_assign_action_clicked)
+        ed_row.append(assign_btn)
+
+        instant_btn = Gtk.Button(label="Remap Single Key (HID)")
+        instant_btn.set_tooltip_text("Immediately send remapping for this key to connected keyboard")
+        instant_btn.connect("clicked", self._on_instant_remap_clicked)
+        ed_row.append(instant_btn)
+
+        editor_card.append(ed_row)
+        box.append(editor_card)
+
+        self._update_selected_key_ui()
+        return box
+
+    def _on_zoom_in(self, btn: Gtk.Button):
+        new_z = round(self.keymap_kb.zoom + 0.15, 2)
+        self.keymap_kb.set_zoom(new_z)
+        self.zoom_lbl.set_label(f"{int(round(self.keymap_kb.zoom * 100))}%")
+
+    def _on_zoom_out(self, btn: Gtk.Button):
+        new_z = round(self.keymap_kb.zoom - 0.15, 2)
+        self.keymap_kb.set_zoom(new_z)
+        self.zoom_lbl.set_label(f"{int(round(self.keymap_kb.zoom * 100))}%")
+
+    def _on_swap_num_fn_clicked(self, btn: Gtk.Button):
+        if not self.driver.connected:
+            self._on_driver_log("Cannot switch: Keyboard not connected")
+            return
+
+        current_map = self.layer_mappings.get(self.current_layer, [])
+        is_already_fn = False
+        if len(current_map) > 1:
+            is_already_fn = (current_map[1][2] == 58)
+
+        layer = self.current_layer
+        target_enable_f = not is_already_fn
+
+        def _worker():
+            try:
+                state_str = "Standard Numbers (1-0, -, =)" if is_already_fn else "Function Keys (F1-F12)"
+                self._on_driver_log(f"Switching Layer {layer} number row to {state_str}...")
+                self.driver.switch_num_to_fn_layer(layer=layer, enable_f_keys=target_enable_f)
+                m = self.driver.get_layout_key_mappings(layer=layer)
+                if m and len(m) == len(KEYBOARD_LAYOUT):
+                    self.layer_mappings[layer] = m
+                    GLib.idle_add(self._update_keymap_kb_labels)
+                    GLib.idle_add(self._update_selected_key_ui)
+                self._on_driver_log(f"✓ Number row successfully switched to {state_str} on hardware!")
+            except Exception as e:
+                self._on_driver_log(f"Error switching number row: {e}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_keymap_key_clicked(self, idx: int):
+        self.selected_key_idx = idx
+        self._update_selected_key_ui()
+
+    def _update_keymap_kb_labels(self):
+        if not hasattr(self, "keymap_kb"):
+            return
+        current_map = self.layer_mappings.get(self.current_layer, [])
+        default_map = get_default_mappings(self.current_layer)
+        labels = []
+        modified = []
+        for i in range(len(KEYBOARD_LAYOUT)):
+            if i < len(current_map):
+                tup = current_map[i]
+                desc = describe_key_tuple(tup)
+                short_desc = desc.split(":")[-1].strip()
+                labels.append(short_desc)
+                def_tup = default_map[i] if i < len(default_map) else (0, 0, 0, 0)
+                modified.append(tup != def_tup)
+            else:
+                labels.append("")
+                modified.append(False)
+        self.keymap_kb.key_sublabels = labels
+        self.keymap_kb.is_modified = modified
+        self.keymap_kb.queue_draw()
+
+    def _update_selected_key_ui(self):
+        if not hasattr(self, "selected_key_title"):
+            return
+        idx = self.selected_key_idx
+        if 0 <= idx < len(KEYBOARD_LAYOUT):
+            key = KEYBOARD_LAYOUT[idx]
+            self.selected_key_title.set_label(f"SELECTED KEY: {key.name} (Layout #{idx}, HW Matrix #{key.index})")
+            current_map = self.layer_mappings.get(self.current_layer, [])
+            default_map = get_default_mappings(self.current_layer)
+            if idx < len(current_map):
+                desc = describe_key_tuple(current_map[idx])
+                def_tup = default_map[idx] if idx < len(default_map) else (0, 0, 0, 0)
+                is_mod = (current_map[idx] != def_tup)
+                mod_tag = "  [⚡ MODIFIED]" if is_mod else ""
+                self.selected_key_badge.set_label(f"Assigned: {desc}{mod_tag}")
+            else:
+                self.selected_key_badge.set_label("Assigned: Standard")
+
+    def _on_action_cat_changed(self, dropdown: Gtk.DropDown, param):
+        idx = dropdown.get_selected()
+        cat = self.action_categories[idx] if idx < len(self.action_categories) else CAT_STANDARD
+        if cat == CAT_STANDARD:
+            self.current_cat_actions = STANDARD_ACTIONS
+        elif cat == CAT_MEDIA:
+            self.current_cat_actions = MEDIA_ACTIONS
+        elif cat == CAT_MOUSE:
+            self.current_cat_actions = MOUSE_ACTIONS
+        elif cat == CAT_LAYER:
+            self.current_cat_actions = LAYER_ACTIONS
+        else:
+            self.current_cat_actions = SYSTEM_ACTIONS
+
+        self.action_model = Gtk.StringList.new([a.name for a in self.current_cat_actions])
+        self.action_dropdown.set_model(self.action_model)
+        self.action_dropdown.set_selected(0)
+
+    def _on_assign_action_clicked(self, btn: Gtk.Button):
+        act_idx = self.action_dropdown.get_selected()
+        if 0 <= act_idx < len(self.current_cat_actions):
+            action = self.current_cat_actions[act_idx]
+            self.layer_mappings[self.current_layer][self.selected_key_idx] = action.tuple
+            self._update_keymap_kb_labels()
+            self._update_selected_key_ui()
+            key = KEYBOARD_LAYOUT[self.selected_key_idx]
+            self._on_driver_log(f"Assigned '{action.name}' to key '{key.name}' (HW #{key.index}) on Layer {self.current_layer}")
+
+    def _on_instant_remap_clicked(self, btn: Gtk.Button):
+        if not self.driver.connected:
+            self._on_driver_log("Cannot remap: Keyboard not connected")
+            return
+        act_idx = self.action_dropdown.get_selected()
+        if not (0 <= act_idx < len(self.current_cat_actions)):
+            return
+        action = self.current_cat_actions[act_idx]
+        self.layer_mappings[self.current_layer][self.selected_key_idx] = action.tuple
+        self._update_keymap_kb_labels()
+        self._update_selected_key_ui()
+
+        matrix_idx = KEYBOARD_LAYOUT[self.selected_key_idx].index
+        key_name = KEYBOARD_LAYOUT[self.selected_key_idx].name
+        layer = self.current_layer
+
+        def _worker():
+            try:
+                self.driver.set_key_mapping(
+                    matrix_index=matrix_idx,
+                    key_type=action.key_type,
+                    code1=action.code1,
+                    code2=action.code2,
+                    code3=action.code3,
+                    layer=layer,
+                )
+                self._on_driver_log(f"✓ Remapped hardware slot #{matrix_idx} ({key_name}) to '{action.name}' on hardware")
+            except Exception as e:
+                self._on_driver_log(f"Error remapping key: {e}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_apply_keymap_clicked(self, btn: Gtk.Button):
+        if not self.driver.connected:
+            self._on_driver_log("Cannot apply keymap: Keyboard not connected")
+            return
+        mappings = list(self.layer_mappings[self.current_layer])
+        layer = self.current_layer
+
+        def _worker():
+            try:
+                self._on_driver_log(f"Writing all 61 key mappings to Layer {layer}...")
+                self.driver.set_all_key_mappings(mappings, layer=layer)
+                self._on_driver_log(f"✓ All key mappings applied successfully to Layer {layer}!")
+            except Exception as e:
+                self._on_driver_log(f"Error applying key mappings: {e}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_read_keymap_clicked(self, btn: Gtk.Button):
+        if not self.driver.connected:
+            self._on_driver_log("Cannot read keymap: Keyboard not connected")
+            return
+        layer = self.current_layer
+
+        def _worker():
+            try:
+                self._on_driver_log(f"Reading live key mappings from Layer {layer}...")
+                m = self.driver.get_layout_key_mappings(layer=layer)
+                if m and len(m) == len(KEYBOARD_LAYOUT):
+                    self.layer_mappings[layer] = m
+                    GLib.idle_add(self._update_keymap_kb_labels)
+                    GLib.idle_add(self._update_selected_key_ui)
+                    self._on_driver_log(f"✓ Read {len(m)} key mappings from hardware Layer {layer}")
+            except Exception as e:
+                self._on_driver_log(f"Error reading key mappings: {e}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_reset_keymap_clicked(self, btn: Gtk.Button):
+        self.layer_mappings[self.current_layer] = get_default_mappings(self.current_layer)
+        self._update_keymap_kb_labels()
+        self._update_selected_key_ui()
+        self._on_driver_log(f"Reset Layer {self.current_layer} to factory defaults")
+
+    def _on_layer_selected(self, dropdown: Gtk.DropDown, param):
+        self.current_layer = dropdown.get_selected()
+        self._update_keymap_kb_labels()
+        self._update_selected_key_ui()
+        self._on_driver_log(f"Selected Layer {self.current_layer}")
+
+    def _on_profile_selected(self, dropdown: Gtk.DropDown, param):
+        self.current_profile = dropdown.get_selected()
+        if self.driver.connected:
+            threading.Thread(target=lambda: self.driver.set_current_profile(self.current_profile), daemon=True).start()
+
+    def _on_sleep_selected(self, dropdown: Gtk.DropDown, param):
+        idx = dropdown.get_selected()
+        seconds_map = [0, 120, 300, 600, 1800]
+        sec = seconds_map[idx] if idx < len(seconds_map) else 300
+        if self.driver.connected:
+            threading.Thread(target=lambda: self.driver.set_auto_sleep_time(sec), daemon=True).start()
+
     def _build_log_tab(self) -> Gtk.Widget:
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -887,7 +1383,17 @@ class AntRGBApp(Adw.Application):
             try:
                 info = self.driver.connect()
                 GLib.idle_add(self._update_connection_ui, True, info)
-                # Apply current pattern
+                try:
+                    m0 = self.driver.get_layout_key_mappings(layer=0)
+                    m1 = self.driver.get_layout_key_mappings(layer=1)
+                    if m0 and len(m0) == len(KEYBOARD_LAYOUT):
+                        self.layer_mappings[0] = m0
+                    if m1 and len(m1) == len(KEYBOARD_LAYOUT):
+                        self.layer_mappings[1] = m1
+                    GLib.idle_add(self._update_keymap_kb_labels)
+                    GLib.idle_add(self._update_selected_key_ui)
+                except Exception as ex:
+                    self._on_driver_log(f"Keymap sync notice: {ex}")
                 self._send_pattern_to_hardware()
             except Exception as e:
                 GLib.idle_add(self._update_connection_ui, False, None)
@@ -906,6 +1412,17 @@ class AntRGBApp(Adw.Application):
                 try:
                     info = self.driver.connect()
                     GLib.idle_add(self._update_connection_ui, True, info)
+                    try:
+                        m0 = self.driver.get_layout_key_mappings(layer=0)
+                        m1 = self.driver.get_layout_key_mappings(layer=1)
+                        if m0 and len(m0) == len(KEYBOARD_LAYOUT):
+                            self.layer_mappings[0] = m0
+                        if m1 and len(m1) == len(KEYBOARD_LAYOUT):
+                            self.layer_mappings[1] = m1
+                        GLib.idle_add(self._update_keymap_kb_labels)
+                        GLib.idle_add(self._update_selected_key_ui)
+                    except Exception as ex:
+                        self._on_driver_log(f"Keymap sync notice: {ex}")
                     self._send_pattern_to_hardware()
                 except Exception as e:
                     self._on_driver_log(f"Connection failed: {e}")

@@ -183,6 +183,43 @@ def cmd_set_key(args: argparse.Namespace) -> int:
         driver.disconnect()
 
 
+def cmd_set_all(args: argparse.Namespace) -> int:
+    """Set all keys to a single solid RGB color."""
+    try:
+        r, g, b = parse_hex_color(args.hex)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    brightness = max(10, min(100, args.brightness))
+    user_mode = args.mode or 16
+    br_factor = brightness / 100.0
+    r_adj = round(r * br_factor)
+    g_adj = round(g * br_factor)
+    b_adj = round(b * br_factor)
+
+    print(f"Setting all 61 keys to RGB({r_adj}, {g_adj}, {b_adj}) (Brightness: {brightness}%)...")
+    driver = HIDDriver(on_log=print)
+    try:
+        driver.connect()
+        driver.set_hardware_animation(user_mode, 4)
+
+        flat = [0] * (KEY_COUNT * 3)
+        for key in KEYBOARD_LAYOUT:
+            flat[key.index * 3] = r_adj
+            flat[key.index * 3 + 1] = g_adj
+            flat[key.index * 3 + 2] = b_adj
+
+        driver.set_all_key_colors(flat, KEY_COUNT)
+        print(f"✓ All keys set to {args.hex}!")
+        return 0
+    except Exception as e:
+        print(f"Error setting key colors: {e}", file=sys.stderr)
+        return 1
+    finally:
+        driver.disconnect()
+
+
 def cmd_hw_animation(args: argparse.Namespace) -> int:
     """Configure onboard hardware lighting animation."""
     mode = args.mode
@@ -251,6 +288,101 @@ def cmd_info(args: argparse.Namespace) -> int:
         return 0
     except Exception as e:
         print(f"Could not connect to device: {e}", file=sys.stderr)
+        return 1
+    finally:
+        driver.disconnect()
+
+
+def cmd_get_keymap(args: argparse.Namespace) -> int:
+    """Read and display key mappings from the keyboard firmware."""
+    driver = HIDDriver()
+    try:
+        driver.connect()
+        layer = args.layer
+        print(f"Reading Layer {layer} key mappings from keyboard...")
+        mappings = driver.get_layout_key_mappings(layer=layer)
+        from .keycodes import describe_key_tuple, get_default_mappings
+        default_map = get_default_mappings(layer)
+        for i, (key, tup) in enumerate(zip(KEYBOARD_LAYOUT, mappings)):
+            desc = describe_key_tuple(tup)
+            def_tup = default_map[i] if i < len(default_map) else (0, 0, 0, 0)
+            is_mod = (tup != def_tup)
+            mod_str = " [⚡ MODIFIED]" if is_mod else ""
+            print(f"Key #{i:02d} [{key.name:6s}] (HW Matrix #{key.index:3d}): {desc}{mod_str}  (raw={tup})")
+        return 0
+    except Exception as e:
+        print(f"Failed to read key mappings: {e}", file=sys.stderr)
+        return 1
+    finally:
+        driver.disconnect()
+
+
+def cmd_remap_key(args: argparse.Namespace) -> int:
+    """Remap a single key on specified layer."""
+    driver = HIDDriver(on_log=print)
+    try:
+        driver.connect()
+        key_idx = None
+        if args.key.isdigit():
+            val = int(args.key)
+            if 0 <= val < len(KEYBOARD_LAYOUT):
+                key_idx = val
+            else:
+                # Might be hardware matrix index
+                for i, k in enumerate(KEYBOARD_LAYOUT):
+                    if k.index == val:
+                        key_idx = i
+                        break
+        else:
+            for i, k in enumerate(KEYBOARD_LAYOUT):
+                if k.name.lower() == args.key.lower():
+                    key_idx = i
+                    break
+        if key_idx is None or not (0 <= key_idx < len(KEYBOARD_LAYOUT)):
+            print(f"Error: Unknown key '{args.key}'. Valid keys include Esc, 1..0, Q, Space, ?, Up, etc.", file=sys.stderr)
+            return 1
+
+        target_key = KEYBOARD_LAYOUT[key_idx]
+
+        from .keycodes import ALL_ACTIONS
+        action = None
+        for a in ALL_ACTIONS:
+            if a.name.lower() == args.action.lower():
+                action = a
+                break
+        if not action:
+            print(f"Error: Unknown action '{args.action}'.", file=sys.stderr)
+            return 1
+
+        driver.set_key_mapping(
+            matrix_index=target_key.index,
+            key_type=action.key_type,
+            code1=action.code1,
+            code2=action.code2,
+            code3=action.code3,
+            layer=args.layer,
+        )
+        print(f"✓ Successfully remapped key #{key_idx} ({target_key.name}, HW #{target_key.index}) to '{action.name}' on Layer {args.layer}!")
+        return 0
+    except Exception as e:
+        print(f"Failed to remap key: {e}", file=sys.stderr)
+        return 1
+    finally:
+        driver.disconnect()
+
+
+def cmd_switch_num_layer(args: argparse.Namespace) -> int:
+    """Switch number row (1..=) to F1..F12 (or back to numbers) for testing."""
+    driver = HIDDriver(on_log=print)
+    try:
+        driver.connect()
+        enable_f = not args.revert
+        driver.switch_num_to_fn_layer(layer=args.layer, enable_f_keys=enable_f)
+        mode_str = "Function Keys F1-F12" if enable_f else "Standard Numbers (1-0, -, =)"
+        print(f"✓ Layer {args.layer} number row successfully switched to {mode_str}!")
+        return 0
+    except Exception as e:
+        print(f"Failed to switch number row: {e}", file=sys.stderr)
         return 1
     finally:
         driver.disconnect()
@@ -334,6 +466,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_set.add_argument("hex", help="Hex color code (e.g. #ff0000 or ff0000)")
     p_set.set_defaults(func=cmd_set_key)
 
+    # set-all
+    p_set_all = subparsers.add_parser("set-all", help="Set solid RGB color for all 61 keys")
+    p_set_all.add_argument("hex", help="Hex color code (e.g. #ff0000 or ff0000)")
+    p_set_all.add_argument("--brightness", "-b", type=int, default=100, help="Brightness percentage (10-100, default 100)")
+    p_set_all.add_argument("--mode", "-m", type=int, default=16, choices=[16, 20], help="UserLight mode (16 standard, 20 for Rev 2.0)")
+    p_set_all.set_defaults(func=cmd_set_all)
+
     # hw-animation
     p_hw = subparsers.add_parser("hw-animation", help="Configure hardware lighting animation")
     p_hw.add_argument("--mode", "-m", type=int, required=True, help="Mode 0-16/20 (0=Off, 1=Static, 2=Breath, 3=Swing, 4=Spin, 5=Stream...)")
@@ -346,6 +485,24 @@ def build_parser() -> argparse.ArgumentParser:
     # info
     p_info = subparsers.add_parser("info", help="Read device hardware information and config")
     p_info.set_defaults(func=cmd_info)
+
+    # get-keymap
+    p_get_km = subparsers.add_parser("get-keymap", help="Read live key mappings from keyboard firmware")
+    p_get_km.add_argument("--layer", "-l", type=int, default=0, choices=[0, 1], help="Layer to read (0=Base, 1=Fn)")
+    p_get_km.set_defaults(func=cmd_get_keymap)
+
+    # remap-key
+    p_remap = subparsers.add_parser("remap-key", help="Remap a key function on the keyboard")
+    p_remap.add_argument("key", help="Key name (e.g. Esc, Caps, Tab, Q, Space, ?, Up) or index (0-60)")
+    p_remap.add_argument("action", help="Target action name (e.g. Mute, VolUp, Esc, Enter, Play/Pause, Slash)")
+    p_remap.add_argument("--layer", "-l", type=int, default=0, choices=[0, 1], help="Layer to remap (0=Base, 1=Fn)")
+    p_remap.set_defaults(func=cmd_remap_key)
+
+    # switch-num-layer
+    p_switch_num = subparsers.add_parser("switch-num-layer", help="Switch number row (1..=) to F1..F12 (or revert to numbers) for testing")
+    p_switch_num.add_argument("--layer", "-l", type=int, default=0, choices=[0, 1], help="Layer to switch (default 0)")
+    p_switch_num.add_argument("--revert", "-r", action="store_true", help="Revert number row back to standard numbers (1-0, -, =)")
+    p_switch_num.set_defaults(func=cmd_switch_num_layer)
 
     # smoke-test
     p_smoke = subparsers.add_parser("smoke-test", help="Run hardware verification test")
