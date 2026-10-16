@@ -23,6 +23,36 @@ Pre-built binaries and packages are available on the [GitHub Releases Page](http
 
 ---
 
+## 📸 Screenshots & Feature Gallery
+
+### 1. 140 Static Patterns & Live 61-Key Visualizer
+Browse 140 static patterns (90 classic + 50 contrasty) grouped by category (*Gradient, Neon/Cyber, Fire/Heat, Ice/Cryo, Dark, Pastel, Metallic, Contrasty*). Real-time 61-key canvas visualizer renders lighting accurately with key legends.
+
+![Static Patterns](resources/screenshots/01-static-patterns.png)
+
+---
+
+### 2. Built-in Hardware Lighting FX
+Control the MK1300 V2 keyboard's onboard hardware animations (16 modes: *Breath, Spin, Stream, Bloom, Rain, Meteor, Soduko, etc.*) with speed, brightness, and RGB/Rainbow spectrum controls.
+
+![Hardware FX](resources/screenshots/02-hardware-fx.png)
+
+---
+
+### 3. Custom Per-Key Canvas Painter
+Click or drag across the interactive 61-key canvas to paint any key color with color picker, palette, batch fill, undo, and one-click import from active pattern.
+
+![Custom Painter](resources/screenshots/03-custom-painter.png)
+
+---
+
+### 4. Key Remapping & Function Layer Switcher
+Remap keys, assign function shortcuts, and switch between Base Layer 0 and Fn Layer 1 with instant hardware write. Includes one-click test toggle for Number Row ↔ F1–F12.
+
+![Key Remapping & Function Layers](resources/screenshots/04-key-functions.png)
+
+---
+
 ## Upstream Credit & License Compliance
 
 This project is a derivative work ported from the open-source web controller:
