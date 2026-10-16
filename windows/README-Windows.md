@@ -11,7 +11,7 @@
 ### Option A — Download the installer (recommended)
 
 Download **`mk1300-win-setup-1.0.0.exe`** from the
-[Releases page](https://github.com/supernova10/mk1300-linux/releases) and run it.
+[Releases page](https://github.com/10supernova/mk1300-linux/releases) and run it.
 
 The installer:
 - Installs `mk1300-win.exe` to `%ProgramFiles%\MK1300RGB\`
@@ -48,7 +48,7 @@ mk1300-win restore-last
 Requirements: Python 3.10+, Inno Setup 6 (optional, for the installer).
 
 ```cmd
-git clone https://github.com/supernova10/mk1300-linux.git
+git clone https://github.com/10supernova/mk1300-linux.git
 cd mk1300-linux
 windows\build-windows.bat
 ```
@@ -70,4 +70,4 @@ it appears under **Human Interface Devices** with VID `36AE`.
 
 ## Reporting Issues
 
-[Open an issue on GitHub](https://github.com/supernova10/mk1300-linux/issues)
+[Open an issue on GitHub](https://github.com/10supernova/mk1300-linux/issues)

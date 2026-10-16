@@ -17,8 +17,8 @@
 
 #define MyAppName      "MK1300 RGB Controller"
 #define MyAppVersion   "1.0.0"
-#define MyAppPublisher "supernova10"
-#define MyAppURL       "https://github.com/supernova10/mk1300-linux"
+#define MyAppPublisher "10supernova"
+#define MyAppURL       "https://github.com/10supernova/mk1300-linux"
 #define MyAppExeName   "mk1300-win.exe"
 
 [Setup]

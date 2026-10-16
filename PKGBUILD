@@ -1,16 +1,16 @@
-# Maintainer: supernova10 <https://github.com/supernova10>
+# Maintainer: 10supernova <https://github.com/10supernova>
 pkgname=mk1300-linux
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="Native Linux per-key RGB lighting controller for Ant Esports MK1300 V2 keyboard"
 arch=('any')
-url="https://github.com/supernova10/mk1300-linux"
+url="https://github.com/10supernova/mk1300-linux"
 license=('Apache-2.0')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-hidapi')
 optdepends=(
     'ttf-jetbrains-mono-nerd: Best typography for key legends'
 )
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/supernova10/${pkgname}/archive/refs/tags/v${pkgver}.tar.gz")
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/10supernova/${pkgname}/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 package() {
