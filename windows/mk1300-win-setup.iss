@@ -50,7 +50,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "addtopath"; Description: "Add mk1300-win to &PATH (recommended)"; GroupDescription: "Environment:"; Flags: checked
+Name: "addtopath"; Description: "Add mk1300-win to &PATH (recommended)"; GroupDescription: "Environment:"
 
 [Files]
 ; Main executable (built by PyInstaller)
