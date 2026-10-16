@@ -1,8 +1,8 @@
-# AntRGB (mk1300-linux / mk1300-win)
+# MK1300V2 — AntRGB (Ant Esports MK1300 V2 Controller)
 
-[![Release](https://img.shields.io/github/v/release/10supernova/mk1300-linux?color=7aa2f7&label=Release)](https://github.com/10supernova/mk1300-linux/releases)
+[![Release](https://img.shields.io/github/v/release/10supernova/mk1300v2?color=7aa2f7&label=Release)](https://github.com/10supernova/mk1300v2/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Arch%20Linux%20%7C%20Windows-7dcfff.svg)](https://github.com/10supernova/mk1300-linux/releases)
+[![Platform](https://img.shields.io/badge/Platform-Arch%20Linux%20%7C%20Windows-7dcfff.svg)](https://github.com/10supernova/mk1300v2/releases)
 
 A sleek, native desktop application and CLI for controlling per-key RGB lighting on the **Ant Esports MK1300 V2** 60% mechanical keyboard. Designed with full native support for **Omarchy / Arch Linux / Hyprland / Wayland** and **Windows**.
 
@@ -12,14 +12,14 @@ Features a modern **Tokyo Night** dark theme with **automatic Omarchy theme inte
 
 ## 📦 Downloads & Releases
 
-Pre-built binaries and packages are available on the [GitHub Releases Page](https://github.com/10supernova/mk1300-linux/releases/latest):
+Pre-built binaries and packages are available on the [GitHub Releases Page](https://github.com/10supernova/mk1300v2/releases/latest):
 
 | Platform | Download Asset | Type | Description |
 |---|---|---|---|
-| **Windows** | [`mk1300-win-setup-1.0.0.exe`](https://github.com/10supernova/mk1300-linux/releases/latest) | Installer | Inno Setup installer; adds CLI to `PATH` & Start Menu |
-| **Windows** | [`mk1300-win.exe`](https://github.com/10supernova/mk1300-linux/releases/latest) | Standalone | Portable single-file Windows CLI executable |
-| **Arch Linux** | [`mk1300-linux-1.0.0-1-any.pkg.tar.zst`](https://github.com/10supernova/mk1300-linux/releases/latest) | Arch Package | Install directly with `sudo pacman -U <file>` |
-| **Linux (All)** | [`mk1300-linux-1.0.0.tar.gz`](https://github.com/10supernova/mk1300-linux/releases/latest) | Source Tarball | Source package with PKGBUILD, scripts, and udev rules |
+| **Windows** | [`mk1300-win-setup-1.0.0.exe`](https://github.com/10supernova/mk1300v2/releases/latest) | Installer | Inno Setup installer; adds CLI to `PATH` & Start Menu |
+| **Windows** | [`mk1300-win.exe`](https://github.com/10supernova/mk1300v2/releases/latest) | Standalone | Portable single-file Windows CLI executable |
+| **Arch Linux** | [`mk1300-linux-1.0.0-1-any.pkg.tar.zst`](https://github.com/10supernova/mk1300v2/releases/latest) | Arch Package | Install directly with `sudo pacman -U <file>` |
+| **Linux (All)** | [`mk1300-linux-1.0.0.tar.gz`](https://github.com/10supernova/mk1300v2/releases/latest) | Source Tarball | Source package with PKGBUILD, scripts, and udev rules |
 
 ---
 
@@ -76,8 +76,8 @@ sudo pacman -U mk1300-linux-1.0.0-1-any.pkg.tar.zst
 
 #### Method 2: Build from Source with PKGBUILD
 ```bash
-git clone https://github.com/10supernova/mk1300-linux.git
-cd mk1300-linux
+git clone https://github.com/10supernova/mk1300v2.git
+cd mk1300v2
 makepkg -si
 ```
 
@@ -106,7 +106,7 @@ sudo udevadm trigger
 ### 🪟 Windows Setup
 
 #### Method 1: Inno Setup Installer (`.exe`)
-1. Download `mk1300-win-setup-1.0.0.exe` from [Releases](https://github.com/10supernova/mk1300-linux/releases/latest).
+1. Download `mk1300-win-setup-1.0.0.exe` from [Releases](https://github.com/10supernova/mk1300v2/releases/latest).
 2. Run the installer. It installs `mk1300-win.exe` to `%LocalAppData%\Programs\MK1300RGB` and adds it to your user `PATH`.
 3. Open PowerShell or Command Prompt and run:
    ```powershell
@@ -125,8 +125,8 @@ sudo udevadm trigger
 #### Building on Windows Locally
 If you prefer building from source on Windows:
 ```cmd
-git clone https://github.com/10supernova/mk1300-linux.git
-cd mk1300-linux
+git clone https://github.com/10supernova/mk1300v2.git
+cd mk1300v2
 windows\build-windows.bat
 ```
 
